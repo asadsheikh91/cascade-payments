@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cascade.Api/Cascade.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cascade.Tests/Cascade.Tests.csproj" />
+  </Folder>
+</Solution>

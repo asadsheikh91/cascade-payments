@@ -1,0 +1,39 @@
+name: cascade
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: cascade
+      POSTGRES_USER: cascade
+      POSTGRES_PASSWORD: cascade
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cascade -d cascade"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Cascade.Api/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      ConnectionStrings__Cascade: Host=postgres;Port=5432;Database=cascade;Username=cascade;Password=cascade
+      # Unset = simulated PSP only. Put sk_test_... in .env to enable Stripe and set PSP_PRIMARY=stripe.
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Payments__PrimaryPsp: ${PSP_PRIMARY:-simulated}
+      Shopify__WebhookSecrets__0: ${SHOPIFY_WEBHOOK_SECRET:-local-dev-secret}
+      Shopify__ShopDomain: ${SHOPIFY_SHOP_DOMAIN:-}
+      Shopify__AdminAccessToken: ${SHOPIFY_ADMIN_TOKEN:-}
+
+volumes:
+  pgdata:
