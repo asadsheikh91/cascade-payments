@@ -15,6 +15,12 @@ docker compose up --build
 
 That brings up Postgres 17 and the API on `http://localhost:8080`. It needs no keys, because a deterministic simulated PSP is always available.
 
+The same stack runs on **SQL Server 2022**:
+
+```bash
+docker compose -f docker-compose.sqlserver.yml up --build
+```
+
 ## Status
 
 | Phase | Scope | State |
@@ -48,6 +54,7 @@ SHOPIFY_WEBHOOK_SECRET=wrong tools/send-shopify-webhook.sh 1001 paid   # 401
 ## Design decisions worth reading
 
 - **[ADR 0001](docs/adr/0001-shopify-webhook-dedup-key.md): the Shopify dedup key.** Shopify's docs disagree on `X-Shopify-Webhook-Id` vs `X-Shopify-Event-Id`. Cascade uses the webhook id for the delivery inbox and the event id for processing idempotency, because two subscriptions on one topic produce two webhook ids for a single event.
+- **[ADR 0003](docs/adr/0003-sql-server-support.md): SQL Server as a second database.** `Database:Provider` picks Postgres or SQL Server. Each has its own migrations, and the four statements EF Core can't express portably sit behind `IDatabaseDialect` (`ON CONFLICT` becomes `MERGE … WITH (HOLDLOCK)`, `SKIP LOCKED` becomes `UPDLOCK, READPAST`, `xmin` becomes `rowversion`). Every test runs on both databases in CI.
 - **[ADR 0002](docs/adr/0002-psp-timeout-is-not-a-decline.md): a PSP timeout is not a decline.** The charge may have succeeded. The attempt is committed before the call, and its id is the PSP idempotency key. A timeout moves the payment to `RequiresVerification`, and the first PSP is asked what happened before anything else is tried.
 
 ### Payments
@@ -93,8 +100,12 @@ To receive real webhooks from a Shopify dev store, expose port 8080 (for example
 ## Development
 
 ```bash
-dotnet test          # needs Docker: Testcontainers starts postgres:17-alpine
-dotnet ef migrations add <Name> -p src/Cascade.Api -o Data/Migrations   # after `dotnet tool restore`
+dotnet test                              # needs Docker: Testcontainers starts postgres:17-alpine
+CASCADE_TEST_DB=sqlserver dotnet test    # the same tests against SQL Server 2022
+
+# A schema change needs one migration per provider (after `dotnet tool restore`):
+dotnet ef migrations add <Name> -p src/Cascade.Api --context CascadeDbContext -o Data/Migrations
+dotnet ef migrations add <Name> -p src/Cascade.Api --context SqlServerCascadeDbContext -o Data/Migrations/SqlServer --namespace Cascade.Api.Data.Migrations.SqlServer
 ```
 
 ## Known gaps (deliberate, for now)

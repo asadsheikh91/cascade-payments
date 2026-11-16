@@ -1,0 +1,42 @@
+# Same stack on SQL Server:  docker compose -f docker-compose.sqlserver.yml up --build
+# The SA password is a local-development value only, like the Postgres credentials in docker-compose.yml.
+name: cascade-sqlserver
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Cascade_dev_Passw0rd
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: src/Cascade.Api/Dockerfile
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      Database__Provider: SqlServer
+      # The API's migrations create the cascade database on first start.
+      ConnectionStrings__Cascade: Server=sqlserver,1433;Database=cascade;User Id=sa;Password=Cascade_dev_Passw0rd;TrustServerCertificate=True
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Payments__PrimaryPsp: ${PSP_PRIMARY:-simulated}
+      Shopify__WebhookSecrets__0: ${SHOPIFY_WEBHOOK_SECRET:-local-dev-secret}
+      Shopify__ShopDomain: ${SHOPIFY_SHOP_DOMAIN:-}
+      Shopify__AdminAccessToken: ${SHOPIFY_ADMIN_TOKEN:-}
+
+volumes:
+  mssqldata:

@@ -10,9 +10,8 @@ var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddDbContext<CascadeDbContext>(o => o
-    .UseNpgsql(config.GetConnectionString("Cascade"))
-    .UseSnakeCaseNamingConvention());
+// Postgres by default; Database:Provider=SqlServer switches the context, migrations and SQL dialect.
+builder.Services.AddCascadeDatabase(config);
 
 builder.Services.AddSingleton(config.GetSection("Payments").Get<PaymentOptions>() ?? new PaymentOptions());
 builder.Services.AddSingleton(config.GetSection("Shopify").Get<ShopifyOptions>() ?? new ShopifyOptions());
