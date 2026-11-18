@@ -7,7 +7,15 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.db }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [postgres, sqlserver]
+    env:
+      # Selects the Testcontainers database in tests/Cascade.Tests/CascadeFactory.cs
+      CASCADE_TEST_DB: ${{ matrix.db }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -15,19 +23,34 @@ jobs:
           global-json-file: global.json
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
-      # Testcontainers uses the runner's Docker daemon to start Postgres.
+      - name: Migrations match the model (both providers)
+        if: matrix.db == 'postgres'
+        run: |
+          dotnet tool restore
+          dotnet ef migrations has-pending-model-changes --project src/Cascade.Api --context CascadeDbContext --configuration Release --no-build
+          dotnet ef migrations has-pending-model-changes --project src/Cascade.Api --context SqlServerCascadeDbContext --configuration Release --no-build
+      # Testcontainers uses the runner's Docker daemon to start Postgres or SQL Server.
       - run: dotnet test --no-build -c Release --logger "trx;LogFileName=results.trx"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results
+          name: test-results-${{ matrix.db }}
           path: "**/TestResults/*.trx"
 
   compose:
+    name: compose smoke test (${{ matrix.db }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - db: postgres
+            file: docker-compose.yml
+          - db: sqlserver
+            file: docker-compose.sqlserver.yml
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose up -d --build --wait
+      - run: docker compose -f ${{ matrix.file }} up -d --build --wait
       - name: Smoke test
         run: |
           for i in $(seq 30); do curl -fsS localhost:8080/health && break; sleep 2; done
@@ -35,4 +58,4 @@ jobs:
             -H 'Content-Type: application/json' -H "Idempotency-Key: ci-$GITHUB_RUN_ID" \
             -d '{"amount":1299,"currency":"EUR","paymentMethod":"sim_ok"}' | grep -q '"status":"Succeeded"'
       - if: failure()
-        run: docker compose logs
+        run: docker compose -f ${{ matrix.file }} logs

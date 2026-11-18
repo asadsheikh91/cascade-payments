@@ -4,8 +4,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cascade.Api.Data;
 
-public sealed class CascadeDbContext(DbContextOptions<CascadeDbContext> options) : DbContext(options)
+/// <summary>
+/// The Postgres model, and the shared model for every provider. SQL Server differences live in
+/// <see cref="SqlServerCascadeDbContext"/>, which has its own migrations.
+/// </summary>
+public class CascadeDbContext : DbContext
 {
+    public CascadeDbContext(DbContextOptions<CascadeDbContext> options) : base(options) { }
+
+    /// <summary>For provider-specific subclasses, which need their own options type.</summary>
+    protected CascadeDbContext(DbContextOptions options) : base(options) { }
+
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<PaymentAttempt> PaymentAttempts => Set<PaymentAttempt>();
     public DbSet<Refund> Refunds => Set<Refund>();

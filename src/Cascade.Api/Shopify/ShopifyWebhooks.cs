@@ -56,7 +56,7 @@ public static class ShopifyWebhookEndpoint
     /// Duplicates also get a 200, otherwise Shopify keeps retrying something we already have.
     /// </summary>
     private static async Task<IResult> Receive(
-        HttpContext http, CascadeDbContext db, ShopifyOptions options, TimeProvider clock, ILoggerFactory logs, CancellationToken ct)
+        HttpContext http, CascadeDbContext db, IDatabaseDialect dialect, ShopifyOptions options, TimeProvider clock, ILoggerFactory logs, CancellationToken ct)
     {
         var log = logs.CreateLogger("Cascade.Shopify.Webhook");
 
@@ -81,7 +81,7 @@ public static class ShopifyWebhookEndpoint
         try
         {
             payload = Encoding.UTF8.GetString(body);
-            using var _ = System.Text.Json.JsonDocument.Parse(payload); // jsonb column would reject it anyway; fail with 400 instead of 500
+            using var _ = System.Text.Json.JsonDocument.Parse(payload); // the payload column would reject it anyway (jsonb / ISJSON check); fail with 400 instead of 500
         }
         catch (Exception ex) when (ex is System.Text.Json.JsonException or DecoderFallbackException)
         {
@@ -94,13 +94,20 @@ public static class ShopifyWebhookEndpoint
             : (DateTimeOffset?)null;
         string? eventId = headers["X-Shopify-Event-Id"];
         string? apiVersion = headers["X-Shopify-API-Version"];
-        var pending = nameof(DeliveryStatus.Pending);
-
-        var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
-            INSERT INTO webhook_deliveries (webhook_id, event_id, topic, shop_domain, api_version, triggered_at, received_at, payload, status, attempts, next_attempt_at)
-            VALUES ({webhookId}, {eventId}, {topic}, {shop}, {apiVersion}, {triggeredAt}, {now}, {payload}::jsonb, {pending}, 0, {now})
-            ON CONFLICT (webhook_id) DO NOTHING
-            """, ct);
+        var inserted = await dialect.InsertDeliveryIfNewAsync(db, new WebhookDelivery
+        {
+            WebhookId = webhookId,
+            EventId = eventId,
+            Topic = topic,
+            ShopDomain = shop,
+            ApiVersion = apiVersion,
+            TriggeredAt = triggeredAt,
+            ReceivedAt = now,
+            Payload = payload,
+            Status = DeliveryStatus.Pending,
+            Attempts = 0,
+            NextAttemptAt = now,
+        }, ct);
 
         if (inserted == 0) log.LogInformation("Duplicate Shopify delivery {WebhookId} ignored", webhookId);
         return Results.Ok();

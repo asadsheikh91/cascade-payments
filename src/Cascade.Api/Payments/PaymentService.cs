@@ -1,7 +1,6 @@
 using Cascade.Api.Data;
 using Cascade.Api.Psp;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace Cascade.Api.Payments;
 
@@ -28,7 +27,7 @@ public sealed class PaymentProviderRegistry(IEnumerable<IPaymentProvider> provid
     public IReadOnlyCollection<string> Names => _byName.Keys;
 }
 
-public sealed class PaymentService(CascadeDbContext db, PaymentProviderRegistry psps, PaymentOptions options, TimeProvider clock, ILogger<PaymentService> log)
+public sealed class PaymentService(CascadeDbContext db, IDatabaseDialect dialect, PaymentProviderRegistry psps, PaymentOptions options, TimeProvider clock, ILogger<PaymentService> log)
 {
     public async Task<(Payment Payment, bool Created)> CreateAsync(CreatePaymentCommand cmd, CancellationToken ct)
     {
@@ -47,7 +46,7 @@ public sealed class PaymentService(CascadeDbContext db, PaymentProviderRegistry 
         {
             await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (DbUpdateException ex) when (dialect.IsUniqueViolation(ex))
         {
             // Lost a race with a concurrent request carrying the same Idempotency-Key.
             db.ChangeTracker.Clear();
@@ -104,7 +103,7 @@ public sealed class PaymentService(CascadeDbContext db, PaymentProviderRegistry 
         if (payment is null) return (null, null, null);
 
         var refund = payment.StartRefund(amount, clock.GetUtcNow());
-        await db.SaveChangesAsync(ct); // xmin concurrency check: two refunds racing on one payment cannot both pass
+        await db.SaveChangesAsync(ct); // concurrency token (xmin / rowversion): two refunds racing on one payment cannot both pass
 
         var result = await psps.Get(payment.Psp!).RefundAsync(refund.Id, payment.PspReference!, amount, CancellationToken.None);
         payment.CompleteRefund(refund, result.Succeeded, result.PspReference, clock.GetUtcNow());

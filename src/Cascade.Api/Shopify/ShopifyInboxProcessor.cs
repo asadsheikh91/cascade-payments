@@ -5,10 +5,11 @@ using Microsoft.EntityFrameworkCore;
 namespace Cascade.Api.Shopify;
 
 /// <summary>
-/// Drains the webhook inbox. Each delivery is claimed with FOR UPDATE SKIP LOCKED inside its own transaction, so
+/// Drains the webhook inbox. Each delivery is claimed with a skip-locked row lock (FOR UPDATE SKIP LOCKED on Postgres,
+/// UPDLOCK + READPAST on SQL Server) inside its own transaction, so
 /// several API replicas can run this safely and a poison message only blocks itself.
 /// </summary>
-public sealed class ShopifyInboxProcessor(CascadeDbContext db, ShopifyOrderProjector projector, TimeProvider clock, ILogger<ShopifyInboxProcessor> log)
+public sealed class ShopifyInboxProcessor(CascadeDbContext db, IDatabaseDialect dialect, ShopifyOrderProjector projector, TimeProvider clock, ILogger<ShopifyInboxProcessor> log)
 {
     public const int MaxAttempts = 10;
 
@@ -27,19 +28,8 @@ public sealed class ShopifyInboxProcessor(CascadeDbContext db, ShopifyOrderProje
 
     private async Task<bool> ProcessOneAsync(CancellationToken ct)
     {
-        var now = clock.GetUtcNow();
-        var pending = nameof(DeliveryStatus.Pending);
-
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var delivery = await db.WebhookDeliveries
-            .FromSql($"""
-                SELECT * FROM webhook_deliveries
-                WHERE status = {pending} AND next_attempt_at <= {now}
-                ORDER BY triggered_at NULLS LAST, received_at
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
-                """)
-            .SingleOrDefaultAsync(ct);
+        var delivery = await dialect.ClaimNextDelivery(db, clock.GetUtcNow()).SingleOrDefaultAsync(ct);
         if (delivery is null) return false;
 
         try

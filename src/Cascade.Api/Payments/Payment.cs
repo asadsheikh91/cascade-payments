@@ -85,7 +85,7 @@ public sealed class Payment
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    /// <summary>Maps to Postgres xmin for optimistic concurrency.</summary>
+    /// <summary>Maps to Postgres xmin for optimistic concurrency. On SQL Server a rowversion column is used instead (SqlServerCascadeDbContext).</summary>
     [Timestamp]
     public uint Version { get; private set; }
 
